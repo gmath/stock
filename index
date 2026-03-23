@@ -32,7 +32,29 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo, useRef, Component } = React;
+
+    // --- 防崩潰錯誤邊界 (ErrorBoundary) ---
+    class ErrorBoundary extends Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null, errorInfo: null };
+      }
+      static getDerivedStateFromError(error) { return { hasError: true, error }; }
+      componentDidCatch(error, errorInfo) { this.setState({ errorInfo }); }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="min-h-screen bg-slate-950 text-red-400 p-10 font-mono">
+              <h1 className="text-3xl font-bold mb-4"><i className="fa-solid fa-triangle-exclamation"></i> 系統發生例外錯誤</h1>
+              <p className="mb-4">很抱歉，模擬器遇到問題，請嘗試重新整理網頁：</p>
+              <pre className="bg-black p-4 rounded-lg overflow-auto text-sm border border-red-900">{this.state.error && this.state.error.toString()}</pre>
+            </div>
+          );
+        }
+        return this.props.children; 
+      }
+    }
 
     // --- 安全的台灣時間取得函數 ---
     const getTWTime = () => {
@@ -45,7 +67,7 @@
       return `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}:${dateObj.getSeconds().toString().padStart(2, '0')}`;
     };
 
-    // --- 圖示對映表 ---
+    // --- 穩定版圖示引擎 (FontAwesome) ---
     const ICON_MAP = {
       "BookOpen": "fa-solid fa-book-open", "TrendingUp": "fa-solid fa-arrow-trend-up", "TrendingDown": "fa-solid fa-arrow-trend-down",
       "CheckCircle2": "fa-solid fa-circle-check", "AlertTriangle": "fa-solid fa-triangle-exclamation", "Clock": "fa-solid fa-clock",
@@ -55,7 +77,7 @@
       "Save": "fa-solid fa-floppy-disk", "RotateCcw": "fa-solid fa-rotate-left", "Upload": "fa-solid fa-upload", "Download": "fa-solid fa-download",
       "Settings": "fa-solid fa-gear", "Activity": "fa-solid fa-bolt", "FastForward": "fa-solid fa-forward-fast", "Play": "fa-solid fa-play",
       "Dices": "fa-solid fa-dice", "Users": "fa-solid fa-users", "Briefcase": "fa-solid fa-briefcase", "RefreshCw": "fa-solid fa-arrows-rotate",
-      "ArrowRight": "fa-solid fa-arrow-right"
+      "ArrowRight": "fa-solid fa-arrow-right", "Spinner": "fa-solid fa-spinner fa-spin", "ChevronDown": "fa-solid fa-chevron-down"
     };
 
     const Icon = ({ name, className = "" }) => {
@@ -78,7 +100,7 @@
     const FEE_RATE = 0.001425;
     const TAX_RATE = 0.003;
 
-    // 音樂連結 (移除 crossOrigin 安全阻擋，換成具競賽感與專注感的音樂)
+    // 音樂連結
     const BGM_TRACKS = [
       { name: "戰局啟動 (緊湊)", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3" },
       { name: "冷靜分析 (專注)", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-16.mp3" }
@@ -142,7 +164,6 @@
       }
     };
 
-    // --- 重大歷史情境卡 ---
     const EVENT_CARDS = [
       { type: '航運', title: '長榮大航海時代起飛！', date: '2021-04-15', targetId: '2603', description: '疫情導致全球供應鏈大亂，加上蘇伊士運河長賜輪擱淺事件，全球運費開始瘋狂飆漲！', explanation: '航運股迎來史無前例的利多，獲利暴增。此時買進航運股，後續將有驚人的爆發力！' },
       { type: '科技', title: '生成式 AI 橫空出世', date: '2023-01-05', targetId: '2330', description: 'ChatGPT 在全球掀起狂潮，市場意識到 AI 運算需要大量的高階晶片支援！', explanation: '台積電身為全球最高階晶片的代工廠，成為這波 AI 浪潮最大受惠者。' },
@@ -471,10 +492,10 @@
       const [dataIndex, setDataIndex] = useState(0); 
       const [livePrices, setLivePrices] = useState({});
       const [isLive, setIsLive] = useState(true);
-      const [isFetchingLive, setIsFetchingLive] = useState(false); // 正在抓取實時資料的狀態
+      const [isFetchingLive, setIsFetchingLive] = useState(false);
       const [isRealTimeSync, setIsRealTimeSync] = useState(false); 
       const [isMarketOpenNow, setIsMarketOpenNow] = useState(false); 
-      const [lastSyncTime, setLastSyncTime] = useState(null); 
+      const [lastSyncTime, setLastSyncTime] = useState(formatTimeStr(getTWTime())); 
       const [groups, setGroups] = useState([]);
       const [activeGroupId, setActiveGroupId] = useState(null);
       
@@ -554,17 +575,17 @@
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             
-            // ★ 關鍵修正：若今天是交易日，但 FinMind 尚未更新今天的資料(盤中)，手動為每一檔股票新增一筆「今天的 K 線」，後續由 Yahoo 實時報價覆蓋
+            // ★ 確保今日 K 線存在
             const todayStr = `${twTime.getFullYear()}-${String(twTime.getMonth()+1).padStart(2,'0')}-${String(twTime.getDate()).padStart(2,'0')}`;
             const isWeekday = twTime.getDay() >= 1 && twTime.getDay() <= 5;
             
-            if (newData['2330'] && newData['2330'].length > 0) {
-                const lastDateInFinMind = newData['2330'][newData['2330'].length - 1].date;
-                if (isWeekday && lastDateInFinMind !== todayStr) {
-                    STOCK_LIST.forEach(stock => {
-                        const stockData = newData[stock.id];
-                        if (stockData && stockData.length > 0) {
-                            const lastCandle = stockData[stockData.length - 1];
+            if (isWeekday) {
+                let anyAdded = false;
+                STOCK_LIST.forEach(stock => {
+                    const stockData = newData[stock.id];
+                    if (stockData && stockData.length > 0) {
+                        const lastCandle = stockData[stockData.length - 1];
+                        if (lastCandle.date !== todayStr) {
                             stockData.push({
                                 date: todayStr,
                                 open: lastCandle.close,
@@ -573,10 +594,11 @@
                                 close: lastCandle.close,
                                 isReal: true
                             });
+                            anyAdded = true;
                         }
-                    });
-                    maxDataLength += 1;
-                }
+                    }
+                });
+                if (anyAdded) maxDataLength += 1;
             }
 
             setHistoricalData(newData);
@@ -591,7 +613,7 @@
       // 判斷是否最新日
       const isLatestDay = historicalData['2330'] && dataIndex >= historicalData['2330'].length - 1;
 
-      // 實時同步邏輯 (每30秒抓取真實數據，完全作廢亂數)
+      // ★ 實時同步邏輯 (雙重備援與強制防快取)
       useEffect(() => {
         if (!isLatestDay || gameStage !== 'playing') {
           setIsRealTimeSync(false);
@@ -606,57 +628,108 @@
             const hours = twTime.getHours();
             const minutes = twTime.getMinutes();
             const day = twTime.getDay();
-            const isOpen = day >= 1 && day <= 5 && (hours > 9 || (hours === 9 && minutes >= 0)) && (hours < 13 || (hours === 13 && minutes <= 30));
+            const isWeekday = day >= 1 && day <= 5;
+            const isOpen = isWeekday && (hours > 9 || (hours === 9 && minutes >= 0)) && (hours < 13 || (hours === 13 && minutes <= 30));
             if (isMounted) setIsMarketOpenNow(isOpen);
 
-            const symbols = STOCK_LIST.map(s => `${s.id}.TW`).join(',');
-            // 使用 _t=Date.now() 與 _cb=Date.now() 雙重破解 proxy 快取，保證抓到最新
-            const targetUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&_t=${Date.now()}`;
-            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}&_cb=${Date.now()}`;
-            
-            const res = await fetch(proxyUrl);
-            const json = await res.json();
-            const parsed = JSON.parse(json.contents);
+            let newLivePrices = {};
+            let fetchedTime = null;
+            let dataSource = null;
+            let parsedData = null;
 
-            if (parsed.quoteResponse && parsed.quoteResponse.result && isMounted) {
-              const newLivePrices = {};
-              let fetchedTime = null;
-              
+            // 1. 嘗試證交所官方 API (零延遲)
+            try {
+              const ex_ch = STOCK_LIST.map(s => `tse_${s.id}.tw`).join('|');
+              const twseUrl = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${ex_ch}&_=${Date.now()}`;
+              const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(twseUrl)}&_cb=${Date.now()}`;
+              const res = await fetch(proxyUrl, { cache: 'no-store' });
+              const json = await res.json();
+              const parsed = JSON.parse(json.contents);
+              if (parsed.msgArray && parsed.msgArray.length > 0) {
+                dataSource = 'TWSE';
+                parsedData = parsed.msgArray;
+              } else { throw new Error("TWSE empty"); }
+            } catch (err) {
+              // 2. 備援：Yahoo Finance
+              const symbols = STOCK_LIST.map(s => `${s.id}.TW`).join(',');
+              const yahooUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&_t=${Date.now()}`;
+              const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}&_cb=${Date.now()}`;
+              const res = await fetch(proxyUrl, { cache: 'no-store' });
+              const json = await res.json();
+              const parsed = JSON.parse(json.contents);
+              if (parsed.quoteResponse && parsed.quoteResponse.result) {
+                dataSource = 'YAHOO';
+                parsedData = parsed.quoteResponse.result;
+              }
+            }
+
+            if (parsedData && isMounted) {
               setHistoricalData(prevHist => {
                  const updatedHist = { ...prevHist };
                  let histModified = false;
                  
-                 parsed.quoteResponse.result.forEach(quote => {
-                    const id = quote.symbol.replace('.TW', '');
-                    const currentPrice = quote.regularMarketPrice;
-                    newLivePrices[id] = currentPrice;
-                    
-                    if (!fetchedTime && quote.regularMarketTime) {
-                      fetchedTime = formatTimeStr(new Date(quote.regularMarketTime * 1000));
-                    }
-                    
-                    // 即時更新今天的 K 線高低點！
-                    if (updatedHist[id] && updatedHist[id].length > 0) {
-                        const lastIdx = updatedHist[id].length - 1;
-                        const todayStr = `${twTime.getFullYear()}-${String(twTime.getMonth()+1).padStart(2,'0')}-${String(twTime.getDate()).padStart(2,'0')}`;
-                        if (updatedHist[id][lastIdx].date === todayStr) {
-                            updatedHist[id][lastIdx] = {
-                                ...updatedHist[id][lastIdx],
-                                open: quote.regularMarketOpen || updatedHist[id][lastIdx].open,
-                                high: quote.regularMarketDayHigh || currentPrice,
-                                low: quote.regularMarketDayLow || currentPrice,
-                                close: currentPrice
-                            };
-                            histModified = true;
-                        }
-                    }
-                 });
+                 if (dataSource === 'TWSE') {
+                   parsedData.forEach(quote => {
+                      const id = quote.c;
+                      const currentPrice = quote.z !== "-" ? parseFloat(quote.z) : parseFloat(quote.y);
+                      newLivePrices[id] = currentPrice;
+                      if (!fetchedTime && quote.t) fetchedTime = quote.t;
+                      
+                      if (updatedHist[id] && updatedHist[id].length > 0) {
+                          const lastIdx = updatedHist[id].length - 1;
+                          const todayStr = `${twTime.getFullYear()}-${String(twTime.getMonth()+1).padStart(2,'0')}-${String(twTime.getDate()).padStart(2,'0')}`;
+                          if (updatedHist[id][lastIdx].date === todayStr) {
+                              const newArr = [...updatedHist[id]];
+                              newArr[lastIdx] = {
+                                  ...newArr[lastIdx],
+                                  open: quote.o !== "-" ? parseFloat(quote.o) : newArr[lastIdx].open,
+                                  high: Math.max(quote.h !== "-" ? parseFloat(quote.h) : currentPrice, newArr[lastIdx].high),
+                                  low: Math.min(quote.l !== "-" ? parseFloat(quote.l) : currentPrice, newArr[lastIdx].low),
+                                  close: currentPrice
+                              };
+                              updatedHist[id] = newArr;
+                              histModified = true;
+                          }
+                      }
+                   });
+                 } else if (dataSource === 'YAHOO') {
+                   parsedData.forEach(quote => {
+                      const id = quote.symbol.replace('.TW', '');
+                      const currentPrice = quote.regularMarketPrice;
+                      newLivePrices[id] = currentPrice;
+                      if (!fetchedTime && quote.regularMarketTime) {
+                        fetchedTime = formatTimeStr(new Date(quote.regularMarketTime * 1000));
+                      }
+                      
+                      if (updatedHist[id] && updatedHist[id].length > 0) {
+                          const lastIdx = updatedHist[id].length - 1;
+                          const todayStr = `${twTime.getFullYear()}-${String(twTime.getMonth()+1).padStart(2,'0')}-${String(twTime.getDate()).padStart(2,'0')}`;
+                          if (updatedHist[id][lastIdx].date === todayStr) {
+                              const newArr = [...updatedHist[id]];
+                              newArr[lastIdx] = {
+                                  ...newArr[lastIdx],
+                                  high: Math.max(quote.regularMarketDayHigh || currentPrice, newArr[lastIdx].high),
+                                  low: Math.min(quote.regularMarketDayLow || currentPrice, newArr[lastIdx].low),
+                                  close: currentPrice
+                              };
+                              updatedHist[id] = newArr;
+                              histModified = true;
+                          }
+                      }
+                   });
+                 }
                  return histModified ? updatedHist : prevHist;
               });
 
               setLivePrices(prev => ({...prev, ...newLivePrices}));
               setIsRealTimeSync(true);
-              setLastSyncTime(fetchedTime || formatTimeStr(twTime));
+              
+              // ★ 盤後強制修正時間為一點半
+              if (!isOpen && isWeekday && hours >= 13) {
+                setLastSyncTime("13:30:00");
+              } else {
+                setLastSyncTime(fetchedTime || formatTimeStr(twTime));
+              }
             }
           } catch (e) {
             if (isMounted) setIsRealTimeSync(false);
@@ -669,7 +742,7 @@
         return () => { isMounted = false; clearInterval(interval); };
       }, [isLatestDay, gameStage]);
 
-      // 視覺跳動 (真實市場徹底關閉模擬，歷史回測才加亂數)
+      // 視覺跳動 (真實開盤絕對不加亂數)
       useEffect(() => {
         if (!isLive || Object.keys(historicalData).length === 0 || gameStage !== 'playing') return;
         const interval = setInterval(() => {
@@ -680,10 +753,9 @@
               if (arr && arr[dataIndex]) {
                 const dayData = arr[dataIndex];
                 if (isLatestDay) {
-                  // ★ 最新真實日：絕不加入亂數，直接呈現 Yahoo 每 30 秒抓到的真實股價！
+                  // ★ 最新真實日：絕不加入亂數，直接呈現真實股價！
                   next[stock.id] = prev[stock.id] || dayData.close;
                 } else {
-                  // 歷史回測：隨機漫步模擬
                   const volatility = (Math.random() - 0.5) * 0.008;
                   let newPrice = (prev[stock.id] || dayData.close) * (1 + volatility);
                   newPrice = Math.min(Math.max(newPrice, dayData.low), dayData.high);
@@ -697,7 +769,7 @@
         return () => clearInterval(interval);
       }, [isLive, dataIndex, historicalData, gameStage, isLatestDay]);
 
-      // 音樂播放邏輯 (強制使用者互動觸發)
+      // 音樂
       const toggleMusic = () => {
         if (!audioRef.current) return;
         if (isMusicPlaying) {
@@ -705,10 +777,8 @@
           setIsMusicPlaying(false);
         } else {
           audioRef.current.src = BGM_TRACKS[bgmIndex].url;
-          audioRef.current.play().then(() => {
-            setIsMusicPlaying(true);
-          }).catch(e => {
-            alert("瀏覽器安全機制阻擋了音樂播放，請隨便點擊網頁其他地方後再試一次！");
+          audioRef.current.play().then(() => setIsMusicPlaying(true)).catch(e => {
+            alert("瀏覽器安全機制阻擋了音樂，請確保點擊過畫面後再試一次！");
             setIsMusicPlaying(false);
           });
         }
@@ -774,10 +844,7 @@
         return true;
       };
 
-      const stepBackTime = (daysAgo) => {
-        const targetIdx = Math.max(0, dataIndex - daysAgo);
-        executeTimeJump(targetIdx);
-      };
+      const stepBackTime = (daysAgo) => { executeTimeJump(Math.max(0, dataIndex - daysAgo)); };
 
       const jumpToEventDate = () => {
         if (!currentEvent) return;
@@ -787,8 +854,7 @@
         for (let i = 0; i < stockData.length; i++) {
           if (stockData[i].date <= targetDate) targetIdx = i; else break;
         }
-        const success = executeTimeJump(targetIdx, `準備跳躍至 ${targetDate}！\n警告：將重置所有小組當前資金與庫存，確定嗎？`);
-        if (success) {
+        if (executeTimeJump(targetIdx, `準備跳躍至 ${targetDate}！\n警告：將重置所有小組當前資金與庫存，確定嗎？`)) {
           setSelectedStockId(currentEvent.targetId); 
           setEventJumpWarning(true); 
         }
@@ -798,18 +864,17 @@
         const max = (historicalData['2330'] || []).length;
         if (dataIndex >= max - 1) { alert("已經推演至最新交易日！"); return; }
         setDataIndex(prev => Math.min(prev + daysToAdvance, max - 1));
-        setCurrentEvent(null); 
-        setEventJumpWarning(false);
+        setCurrentEvent(null); setEventJumpWarning(false);
       };
+
+      const tp = selectedStockDetail ? selectedStockDetail.price * tradeShares : 0;
+      const tf = Math.max(20, Math.floor(tp * FEE_RATE));
+      const tt = tradeType === 'sell' ? Math.floor(tp * TAX_RATE) : 0;
+      const tc = tradeType === 'buy' ? tp + tf : tp - tf - tt;
 
       const handleTrade = () => {
         if (!activeGroup || !selectedStockDetail || tradeShares <= 0) return;
         
-        const tp = selectedStockDetail.price * tradeShares;
-        const tf = Math.max(20, Math.floor(tp * FEE_RATE));
-        const tt = tradeType === 'sell' ? Math.floor(tp * TAX_RATE) : 0;
-        const tc = tradeType === 'buy' ? tp + tf : tp - tf - tt;
-
         setGroups(prevGroups => prevGroups.map(g => {
           if (g.id !== activeGroupId) return g;
           if (tradeType === 'buy') {
@@ -829,7 +894,7 @@
         setTradeShares(1000);
       };
 
-      // 存檔
+      // 存檔讀檔
       const saveLocal = () => { localStorage.setItem('stockCampSave', JSON.stringify({ groups, activeGroupId, dataIndex })); alert('進度已存入本機！'); };
       const loadLocal = () => {
         const data = localStorage.getItem('stockCampSave');
@@ -896,7 +961,6 @@
                 <div>小組名稱</div><div>起始資金 (元)</div><div></div>
               </div>
               <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar mb-6">
-                {tempGroups.length === 0 && <p className={t.textMuted}>尚未新增小組</p>}
                 {tempGroups.map((g, index) => (
                   <div key={g.id} className="flex gap-2 items-center group">
                     <span className={`${t.textMuted} w-5 font-bold`}>{index + 1}.</span>
@@ -916,12 +980,6 @@
           </div>
         );
       }
-
-      // 動態計算 UI 價金避免變數未定義
-      const tp = selectedStockDetail ? selectedStockDetail.price * tradeShares : 0;
-      const tf = Math.max(20, Math.floor(tp * FEE_RATE));
-      const tt = tradeType === 'sell' ? Math.floor(tp * TAX_RATE) : 0;
-      const tc = tradeType === 'buy' ? tp + tf : tp - tf - tt;
 
       return (
         <div className={`min-h-screen ${t.appBg} ${t.text} font-sans pb-10 transition-colors duration-700`}>
@@ -994,7 +1052,7 @@
                     股市夏令營
                     {isLatestDay ? (
                       isFetchingLive ? (
-                         <span className="flex items-center gap-1 text-blue-400 text-xs ml-2 px-2 py-1 bg-blue-500/10 rounded-md border border-blue-500/30 font-bold"><i className="fa-solid fa-spinner fa-spin"></i> 獲取最新報價中...</span>
+                         <span className="flex items-center gap-1 text-blue-400 text-xs ml-2 px-2 py-1 bg-blue-500/10 rounded-md border border-blue-500/30 font-bold"><Icon name="Spinner" className="w-3 h-3" /> 獲取最新報價中...</span>
                       ) : isMarketOpenNow ? (
                         <span className="flex items-center gap-1 text-emerald-500 text-xs ml-2 px-2 py-1 bg-emerald-500/10 rounded-md border border-emerald-500/50 animate-pulse font-bold"><Icon name="Wifi" className="w-3 h-3" /> 🟢 盤中即時連線 ({lastSyncTime})</span>
                       ) : (
@@ -1163,9 +1221,14 @@
             <div className="lg:col-span-4 flex flex-col gap-6">
               <div className={`rounded-3xl border p-6 shadow-xl transition-colors ${currentTheme === 'light' ? 'bg-gradient-to-br from-blue-50 to-indigo-100 border-blue-200' : 'bg-gradient-to-br from-blue-900/50 to-indigo-900/50 border-blue-700/50 backdrop-blur-xl'}`}>
                 <label className={`text-sm font-extrabold mb-3 flex items-center gap-2 tracking-wider ${currentTheme === 'light' ? 'text-blue-800' : 'text-blue-200'}`}><Icon name="Users" className="w-5 h-5"/> 操作小組</label>
-                <select value={activeGroupId || ''} onChange={(e) => setActiveGroupId(e.target.value)} className={`w-full rounded-2xl p-4 text-xl font-extrabold focus:ring-4 focus:ring-blue-500/50 outline-none appearance-none transition-colors shadow-sm cursor-pointer ${currentTheme === 'light' ? 'bg-white border border-blue-200 text-blue-900' : 'bg-slate-900/80 border border-blue-500/30 text-white'}`}>
-                  {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                </select>
+                <div className="relative w-full">
+                  <select value={activeGroupId || ''} onChange={(e) => setActiveGroupId(e.target.value)} className={`w-full rounded-2xl p-4 pr-10 text-xl font-extrabold focus:ring-4 focus:ring-blue-500/50 outline-none transition-colors shadow-sm cursor-pointer ${currentTheme === 'light' ? 'bg-white border border-blue-200 text-blue-900' : 'bg-slate-800 border border-blue-500/30 text-white'}`}>
+                    {groups.map(g => <option key={g.id} value={g.id} className="bg-slate-800 text-white text-lg font-bold">{g.name}</option>)}
+                  </select>
+                  <div className={`absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none ${currentTheme === 'light' ? 'text-blue-500' : 'text-blue-400'}`}>
+                    <Icon name="ChevronDown" className="w-5 h-5" />
+                  </div>
+                </div>
                 <div className={`mt-5 flex justify-between items-end p-4 rounded-2xl border transition-colors shadow-sm ${currentTheme === 'light' ? 'bg-white/60 border-blue-200' : 'bg-black/20 border-white/5'}`}>
                   <div>
                     <div className={`text-xs font-bold mb-1.5 ${currentTheme === 'light' ? 'text-blue-600' : 'text-blue-300'}`}>該組總資產</div>
@@ -1246,9 +1309,8 @@
       );
     };
 
-    // React 18 渲染語法
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    root.render(<ErrorBoundary><App /></ErrorBoundary>);
   </script>
 </body>
 </html>
